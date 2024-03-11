@@ -1,9 +1,26 @@
 import requests
 import os
 import uuid
+import mysql.connector
 from models.service import Service
 
-def get_json_files(repo_owner, repo_name, access_token, path=''):
+HOST = os.environ.get('HOST')
+USER = os.environ.get('USER')
+PASSWORD = os.environ.get('PASSWORD')
+DATABASE_NAME = os.environ.get('DATABASE_NAME')
+
+# DEV ENV
+db = mysql.connector.connect(
+    host=HOST,
+    user=USER,
+    password=PASSWORD,
+    database=DATABASE_NAME
+)
+
+# Create a cursor object
+cursor = db.cursor()
+
+def get_metadata_json(repo_owner, repo_name, access_token, path=''):
 
     api_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{path}"
     headers = {'Authorization': f'token {access_token}'}
@@ -33,12 +50,19 @@ def get_json_files(repo_owner, repo_name, access_token, path=''):
                     services.append(new_service)
             elif item['type'] == 'dir':
                 # Recursively get JSON files from subdirectories
-                subdir_files = get_json_files(repo_owner, repo_name, access_token, f"{path}/{item['name']}")
+                subdir_files = get_metadata_json(repo_owner, repo_name, access_token, f"{path}/{item['name']}")
                 services.extend(subdir_files)
         return services
     else:
         print(f"Failed to fetch repository contents. Status code: {response.status_code}")
         return None
+
+def post_service(service):
+    sql = "INSERT INTO services (id, name, owner) VALUES (%s, %s, %s)"
+    val = (service.id, service.name, service.owner)
+    cursor.execute(sql, val)
+    print(f"Inserted {service.name} into the database")
+    db.commit()
 
 if __name__ == "__main__":
 
@@ -47,11 +71,14 @@ if __name__ == "__main__":
     ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN')
 
     # Get JSON files from the repository
-    json_files = get_json_files(REPO_OWNER, REPO_NAME, ACCESS_TOKEN)
+    services = get_metadata_json(REPO_OWNER, REPO_NAME, ACCESS_TOKEN)
 
-    if json_files:
+    if services:
         print("JSON files found in the repository:")
-        for json_file in json_files:
-            print(f"{json_file.id} \t {json_file.name} \t {json_file.owner}")
+        for service in services:
+            post_service(service)
+            # print(f"{service.id} \t {service.name} \t {service.owner}")
     else:
         print("No JSON files found in the repository.")
+
+    db.close()
